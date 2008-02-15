@@ -189,7 +189,7 @@
                                       // specific elements. 
 
 // Ethernet implemented in Altera Chips (uncomment following lines)
-//`define ETH_ALTERA_ALTSYNCRAM
+`define ETH_ALTERA_ALTSYNCRAM
 
 // Ethernet implemented in ASIC with Virtual Silicon RAMs
 // `define ETH_VIRTUAL_SILICON_RAM     // Virtual Silicon RAMS used storing buffer decriptors (ASIC implementation)
@@ -198,7 +198,7 @@
 // `define ETH_ARTISAN_RAM             // Artisan RAMS used storing buffer decriptors (ASIC implementation)
 
 // Uncomment when Avalon bus is used
-//`define ETH_AVALON_BUS
+`define ETH_AVALON_BUS
 
 `define ETH_MODER_ADR         8'h0    // 0x0 
 `define ETH_INT_SOURCE_ADR    8'h1    // 0x4 
@@ -335,6 +335,7 @@
 
 
 // Following defines are needed when eth_cop.v is used. Otherwise they may be deleted.
+/* -----\/----- EXCLUDED -----\/-----
 `define ETH_BASE              32'hd0000000
 `define ETH_WIDTH             32'h800
 `define MEMORY_BASE           32'h2000
@@ -344,5 +345,6 @@
 `define M1_ADDRESSED_S2 ( (m1_wb_adr_i >= `MEMORY_BASE) & (m1_wb_adr_i < (`MEMORY_BASE + `MEMORY_WIDTH)) )
 `define M2_ADDRESSED_S1 ( (m2_wb_adr_i >= `ETH_BASE)    & (m2_wb_adr_i < (`ETH_BASE    + `ETH_WIDTH   )) )
 `define M2_ADDRESSED_S2 ( (m2_wb_adr_i >= `MEMORY_BASE) & (m2_wb_adr_i < (`MEMORY_BASE + `MEMORY_WIDTH)) )
+ -----/\----- EXCLUDED -----/\----- */
 // Previous defines are only needed for eth_cop.v
 
