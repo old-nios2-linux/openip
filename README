@@ -1,5 +1,9 @@
 
-These are collections of open ip cores.
+These are collections of open ip cores for Quartus v7.1 or later, ie, 
+using xxx_hw.tcl to declare components.
+
+Usage: add the path of these ip directory to the library path of your 
+Quartus projects.
 
 openeth : Opencores ethernet MAC
 
