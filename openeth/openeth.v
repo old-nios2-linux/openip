@@ -1,12 +1,13 @@
 module openeth ( /*AUTOARG*/
    // Outputs
    s_readdata, s_waitrequest, m_address, m_byteenable, m_read,
-   m_write, m_writedata, tx_d, tx_en, tx_err, md_c, md_out, md_oe,
-   s_irq,
+   m_write, m_writedata, tx_d, tx_en, tx_err, md_c, s_irq,
+   // Inouts
+   md_io,
    // Inputs
    clk, reset, s_address, s_chipselect, s_write, s_read, s_byteenable,
    s_writedata, m_readdata, m_waitrequest, tx_clk, rx_clk, rx_d,
-   rx_dv, rx_err, rx_col, rx_crs, md_in
+   rx_dv, rx_err, rx_col, rx_crs
    );
 
    input clk;
@@ -42,15 +43,21 @@ module openeth ( /*AUTOARG*/
    input 	  rx_crs;
    // MIIM
    output 	  md_c;
-   input 	  md_in;
-   output 	  md_out;
-   output 	  md_oe;
+   inout 	  md_io;
    // irq
    output 	  s_irq;
  	  
    wire 	  m_stb;
    assign 	  m_read = m_stb & ~m_write;
-   
+
+   wire 	  ack_o;
+   assign 	  s_waitrequest = ~ack_o;
+
+   wire 	  md_out;
+   wire 	  md_oe;
+   wire 	  md_in;
+   assign 	  md_in = md_io;
+   assign 	  md_io = md_oe ? md_out : 1'bz;
 
 eth_top the_eth
 (
@@ -65,8 +72,8 @@ eth_top the_eth
   .wb_sel_i (s_byteenable),
   .wb_we_i  (s_write),
   .wb_cyc_i (s_chipselect),
-  .wb_stb_i (s_read | s_write),
-  .wb_ack_o (s_waitrequest),
+  .wb_stb_i (s_chipselect),
+  .wb_ack_o (ack_o),
 
   // WISHBONE master
   .m_wb_adr_o (m_address),
@@ -75,7 +82,7 @@ eth_top the_eth
   .m_wb_dat_o (m_writedata),
   .m_wb_dat_i (m_readdata),
   .m_wb_stb_o (m_stb),
-  .m_wb_ack_i (m_waitrequest),
+  .m_wb_ack_i (~m_waitrequest),
   .m_wb_err_i (1'b0), 
 
   //TX
