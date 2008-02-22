@@ -2,8 +2,9 @@
 These are collections of open ip cores for Quartus v7.1 or later, ie, 
 using xxx_hw.tcl to declare components.
 
-Usage: add the path of these ip directory to the library path of your 
-Quartus projects.
+Usage: add the path of these ip directories to SOPC Builder. 
+Tools-->Options-->IP Search Path-->Add...
+File-->Refresh Component List
 
-openeth : Opencores ethernet MAC
-
+openeth: Opencores ethernet MAC
+irqn: simple irq inverter
