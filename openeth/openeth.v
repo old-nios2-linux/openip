@@ -13,7 +13,7 @@ module openeth ( /*AUTOARG*/
    input clk;
    input reset;
    // slave
-   input  [11: 2] s_address;
+   input  [9: 0]  s_address;
    input  	  s_chipselect;
    input 	  s_write;
    input 	  s_read;
@@ -22,7 +22,7 @@ module openeth ( /*AUTOARG*/
    output [31: 0] s_readdata;
    output 	  s_waitrequest;
    // memory master
-   output [31: 2] m_address;
+   output [31: 0] m_address;
    output [ 3: 0] m_byteenable;
    output 	  m_read;
    output 	  m_write;
@@ -68,7 +68,7 @@ eth_top the_eth
   // WISHBONE slave
   .wb_dat_i (s_writedata),
   .wb_dat_o (s_readdata), 
-  .wb_adr_i (s_address[11:2]),
+  .wb_adr_i (s_address),
   .wb_sel_i (s_byteenable),
   .wb_we_i  (s_write),
   .wb_cyc_i (s_chipselect),
