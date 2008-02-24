@@ -189,7 +189,7 @@
                                       // specific elements. 
 
 // Ethernet implemented in Altera Chips (uncomment following lines)
-`define ETH_ALTERA_ALTSYNCRAM
+// `define ETH_ALTERA_ALTSYNCRAM
 
 // Ethernet implemented in ASIC with Virtual Silicon RAMs
 // `define ETH_VIRTUAL_SILICON_RAM     // Virtual Silicon RAMS used storing buffer decriptors (ASIC implementation)
