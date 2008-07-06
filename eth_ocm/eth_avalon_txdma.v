@@ -13,46 +13,54 @@
 ////  file.                                                       ////
 ////                                                              ////
 //////////////////////////////////////////////////////////////////////
+//    History:
+//      07/03/08 - Repaired bug with determining number of valid
+//                 bytes corresponding to last data read from
+//                 memory. Code was examining length field from
+//                 descriptor input rather than registered
+//                 descriptor data.
+//
+//
 module eth_avalon_txdma    #(parameter FIFO_DEPTH=128) (
     //Commaon signals
-    input               clk,
+    input               clk,                // System clock
     input               reset,
 
     //Descriptor ram interface
-    input       [6:0]   max_tx_bd,          //Highest index RX Descriptor
-    input       [31:0]  bd_desc,            //Descriptor Control data input
-    input       [31:0]  bd_ptr,             //Descriptor pointer input
-    input               bd_wait,            //Descriptor RAM is busy
+    input       [6:0]   max_tx_bd,          // Highest index RX Descriptor
+    input       [31:0]  bd_desc,            // Descriptor Control data input
+    input       [31:0]  bd_ptr,             // Descriptor pointer input
+    input               bd_wait,            // Descriptor RAM is busy
 
-    output              bd_write,           //write control data to BD RAM
-    output              bd_read,            //read control and pointer data from BD RAM
-    output  reg [6:0]   bd_index,           //Which descriptor to read
-    output      [31:0]  bd_writedata,       //Control data to be written to descriptor
+    output              bd_write,           // write control data to BD RAM
+    output              bd_read,            // read control and pointer data from BD RAM
+    output  reg [6:0]   bd_index,           // Which descriptor to read
+    output      [31:0]  bd_writedata,       // Control data to be written to descriptor
 
     //Memory port interface
-    input               av_waitrequest,     //Memory port is busy
-    input       [31:0]  av_readdata,        //Memory port readdata
-    input               av_readdatavalid,   //Memory port readdata valid signal
+    input               av_waitrequest,     // Memory port is busy
+    input       [31:0]  av_readdata,        // Memory port readdata
+    input               av_readdatavalid,   // Memory port readdata valid signal
 
-    output  reg         av_read,            //Memory port read
-    output  reg [31:0]  av_address,         //Memory port address
+    output  reg         av_read,            // Memory port read
+    output  reg [31:0]  av_address,         // Memory port address
 
     //Streaming interface
-    input               TxEn,               //Enable transmit
-    input               txclk,              //Transmit clock
-    output      [7:0]   tx_data,            //output data
-    output              tx_dv,              //qualifies dataout, startofpacket, and endofpacket
-    output              tx_sop,             //start of data packet
-    output              tx_eop,             //end of data packet
-    input               tx_ack,             //Acknowledge TX data
-    input       [8:0]   tx_stat,            //Status bits
-    input               tx_stat_valid,      //Status is valid
+    input               TxEn,               // Enable transmit
+    input               txclk,              // Transmit clock
+    output      [7:0]   tx_data,            // output data
+    output              tx_dv,              // qualifies dataout, startofpacket, and endofpacket
+    output              tx_sop,             // start of data packet
+    output              tx_eop,             // end of data packet
+    input               tx_ack,             // Acknowledge TX data
+    input       [8:0]   tx_stat,            // Status bits
+    input               tx_stat_valid,      // Status is valid
     output              tx_stat_ack,
     input               tx_retry,
 
-    output              PerPacketPad,       //Per packet pad
-    output              PerPacketCrc,       //Per packet crc
-    output              TxUnderRun,         //An underrun occured
+    output              PerPacketPad,       // Per packet pad
+    output              PerPacketCrc,       // Per packet crc
+    output              TxUnderRun,         // An underrun occured
 
     //Interrupt outputs
     output  reg         TxB_IRQ,
@@ -62,98 +70,99 @@ module eth_avalon_txdma    #(parameter FIFO_DEPTH=128) (
 //Some useful constant functions
 `include "eth_avalon_functions.v"
 
-localparam  MINFD   = max(FIFO_DEPTH,128);  //Minimum 128 byte FIFO depth
-localparam  RFD     = nextPow2(MINFD)>>2;   //FIFO depth next power of 2 (and divide by 4)
+localparam  MINFD   = max(FIFO_DEPTH,128);  // Minimum 128 byte FIFO depth
+localparam  RFD     = nextPow2(MINFD)>>2;   // FIFO depth next power of 2 (and divide by 4)
 
-//FF_FULL_THRESHOLD is the number of words in the FIFO before we set the
-//almost FULL flag. In other words. We pause reading data from memory if
-//the FIFO reaches this level. If we are overrunning the FIFO, this
-//number needs to be reduced.
+// FF_FULL_THRESHOLD is the number of words in the FIFO before we set the
+// almost FULL flag. In other words. We pause reading data from memory if
+// the FIFO reaches this level. If we are overrunning the FIFO, this
+// number needs to be reduced.
 localparam  FF_FULL_THRESHOLD = RFD - 16;
 
 //Bit descriptions for TX descriptor
-localparam  BIT_LEN_H   = 31,   //Upper bit of length field
-            BIT_LEN_L   = 16,   //Lower bit of length field
+localparam  BIT_LEN_H   = 31,   // Upper bit of length field
+            BIT_LEN_L   = 16,   // Lower bit of length field
             //Control bits
-            BIT_READY   = 15,   //Ready control bit (1=READY Controller can write to it)
-            BIT_IRQ     = 14,   //Generate an interrupt at end of TX
-            BIT_WRAP    = 13,   //Wrap to first RX descriptor after this one
-            BIT_PAD     = 12,   //Add Padding to small frames
-            BIT_CRC     = 11,   //Add CRC
-            BIT_RSVD_H  = 10,   //Upper bit of reserved field
-            BIT_RSVD_L  = 9,    //Lower bit of reserved field
+            BIT_READY   = 15,   // Ready control bit (1=READY Controller can write to it)
+            BIT_IRQ     = 14,   // Generate an interrupt at end of TX
+            BIT_WRAP    = 13,   // Wrap to first RX descriptor after this one
+            BIT_PAD     = 12,   // Add Padding to small frames
+            BIT_CRC     = 11,   // Add CRC
+            BIT_RSVD_H  = 10,   // Upper bit of reserved field
+            BIT_RSVD_L  = 9,    // Lower bit of reserved field
             //Status bits
-            BIT_UR      = 8,    //Buffer Underrun
-            BIT_RTRY_H  = 7,    //Upper bit of retry count
-            BIT_RTRY_L  = 4,    //Lower bit of retry count
-            BIT_RL      = 3,    //Retransmission Limit
-            BIT_LC      = 2,    //Late Collision
-            BIT_DF      = 1,    //Defer Indication
-            BIT_CS      = 0;    //Carrier Sense Lost
+            BIT_UR      = 8,    // Buffer Underrun
+            BIT_RTRY_H  = 7,    // Upper bit of retry count
+            BIT_RTRY_L  = 4,    // Lower bit of retry count
+            BIT_RL      = 3,    // Retransmission Limit
+            BIT_LC      = 2,    // Late Collision
+            BIT_DF      = 1,    // Defer Indication
+            BIT_CS      = 0;    // Carrier Sense Lost
 
 //State bits
 localparam  ST_IDLE     =   0,
-            ST_BD_RD    =   1,  //Read Descriptor
-            ST_DMA1     =   2,  //Transfer first word
-            ST_DMA2     =   3,  //Wait for data to be written to FIFO 
-            ST_STAT     =   4,  //Wait for status from MAC
-            ST_BD_WR    =   5;  //Write status back to MAC
+            ST_BD_RD    =   1,  // Read Descriptor
+            ST_DMA1     =   2,  // Transfer first word
+            ST_DMA2     =   3,  // Wait for data to be written to FIFO 
+            ST_STAT     =   4,  // Wait for status from MAC
+            ST_BD_WR    =   5;  // Write status back to MAC
 
 //TX State machine bits
-localparam  TX_IDLE     =   0,
-            TX_SEND     =   1,
-            TX_WAIT     =   2;
+localparam  TX_IDLE     =   0,  // Waiting for data to transmit
+            TX_SEND     =   1,  // Sending transmit data
+            TX_WAIT     =   2;  // Waiting for status from MAC
 
-wire            pre_av_read;
-wire    [31:0]  pre_av_address;
+wire            pre_av_read;    // pre-registered avalon read signal
+wire    [31:0]  pre_av_address; // pre_registered avalon address
 
-reg     [5:0]   state;
-wire    [15:0]  bd_len;         //Frame length from descriptor
+reg     [5:0]   state;          // State machine bits
+wire    [15:0]  bd_len;         // Frame length from descriptor
 
-reg     [31:0]  ptr;
-reg     [31:0]  desc;
+reg     [31:0]  ptr;            // Memory read pointer
+reg     [31:0]  desc;           // Registered bd_desc
+wire    [15:0]  desc_len;       // Frame length from stored descriptor
 
-wire    [1:0]   valid_cnt;
-reg     [1:0]   first_valid_cnt;
-reg     [1:0]   last_valid_cnt;
+wire    [1:0]   valid_cnt;      // Number of valid bytes in current data word
+reg     [1:0]   first_valid_cnt;// Number of valid bytes in first data word
+reg     [1:0]   last_valid_cnt; // Number of valid bytes in last data word
 
-reg     [13:0]  tg_cnt;         //target count (number of words to read from memory)
-reg     [13:0]  rd_cnt;         //read count (number of words read from memory)
-reg     [13:0]  wr_cnt;         //write count (number of words written to FIFO)
-wire    [15:0]  next_tg_cnt;    //intentionally 2 bits larger
-wire    [13:0]  next_rd_cnt;
-wire    [13:0]  next_wr_cnt;
+reg     [13:0]  tg_cnt;         // target count (number of words to read from memory)
+reg     [13:0]  rd_cnt;         // read count (number of words read from memory)
+reg     [13:0]  wr_cnt;         // write count (number of words written to FIFO)
+wire    [15:0]  next_tg_cnt;    // intentionally 2 bits larger
+wire    [13:0]  next_rd_cnt;    // next value of rd_cnt
+wire    [13:0]  next_wr_cnt;    // next value of wr_cnt
 
-wire            last_read;      //Last read from memory
-reg             last_read_r;
-wire            first_write;    //First write to FIFO
-wire            last_write;     //Last write to FIFO
+wire            last_read;      // Last read from memory
+reg             last_read_r;    // Registered last_read
+wire            first_write;    // First write to FIFO
+wire            last_write;     // Last write to FIFO
 
-reg     [31:0]  rdata;          //registered av_readdata
-reg             valid_rdata;    //registered av_readdatavalid
+reg     [31:0]  rdata;          // registered av_readdata
+reg             valid_rdata;    // registered av_readdatavalid
 
-wire            stat_ready;     //Status ready from TX
+wire            stat_ready;     // Status ready from TX
 reg     [BIT_UR:BIT_CS] stat;
-wire            stat_error;     //Status indicates error
+wire            stat_error;     // Status indicates error
 
 
-wire            dff_clear;
+wire            dff_clear;      // Data FIFO clear
 wire    [clogb2(RFD-1):0]   dff_wrused;
-wire            dff_almost_full;
-wire            dff_full;
-wire            dff_write;
-wire    [35:0]  dff_din;
+wire            dff_almost_full;// Data FIFO almost full
+wire            dff_full;       // Data FIFO full
+wire            dff_write;      // Data FIFO write
+wire    [35:0]  dff_din;        // Data FIFO data input
 
-wire            dff_read;
-wire            dff_empty;
-wire    [35:0]  dff_dout;
+wire            dff_read;       // Data FIFO read
+wire            dff_empty;      // Data FIFO empty
+wire    [35:0]  dff_dout;       // Data FIFO data output
 
-reg     [2:0]   tx_state;
-reg             tx_stat_valid_r;
-wire            last_byte;
-wire    [7:0]   tx_ff_data [0:3];
-wire    [1:0]   byte_cnt;
-reg     [1:0]   byte_index;
+reg     [2:0]   tx_state;       // Transmit state machine bits
+reg             tx_stat_valid_r;// Registered tx_stat_valid
+wire            last_byte;      // Indicates last valid byte of current data word
+wire    [7:0]   tx_ff_data [0:3];// Transmit bytes from data FIFO
+wire    [1:0]   byte_cnt;       // Indicates how many bytes are valid from data FIFO
+reg     [1:0]   byte_index;     // Indexes tx_ff_data for byte transmission
 
 //Avalon bus
 assign  pre_av_address  = {ptr[31:2],2'b00};
@@ -174,6 +183,8 @@ assign  bd_writedata[BIT_RSVD_H:BIT_RSVD_L] = desc[BIT_RSVD_H:BIT_RSVD_L]; //lea
 assign  bd_writedata[BIT_UR:BIT_CS]         = stat[BIT_UR:BIT_CS];  //set status flags
 
 assign  bd_len      = bd_desc[BIT_LEN_H:BIT_LEN_L];
+assign  desc_len    = desc[BIT_LEN_H:BIT_LEN_L];
+
 
 //Add a pipeline stage for Avalon reads
 always @(posedge clk or posedge reset)
@@ -249,7 +260,7 @@ always @(posedge clk) begin
 
         state[ST_DMA1 ]: begin
                                             first_valid_cnt <= (3'd3 - {1'b0,ptr[1:0]});
-                                            last_valid_cnt  <= (bd_len[2:0] + {1'b0,ptr[1:0]}) - 3'd1;
+                                            last_valid_cnt  <= (desc_len[2:0] + {1'b0,ptr[1:0]}) - 3'd1;
             if(valid_tx_rd) begin 
                                             ptr[31:2]   <= ptr[31:2] + 30'd1;   //increment read address
                                             last_read_r <= last_read;           //set last read flag
