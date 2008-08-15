@@ -20,6 +20,8 @@
 //                 descriptor input rather than registered
 //                 descriptor data.
 //
+//      08/12/08 - Added logic to prevent FIFO overflows when 
+//                 Avalon BUS has large latency.
 //
 module eth_avalon_txdma    #(parameter FIFO_DEPTH=128) (
     //Commaon signals
@@ -73,11 +75,8 @@ module eth_avalon_txdma    #(parameter FIFO_DEPTH=128) (
 localparam  MINFD   = max(FIFO_DEPTH,128);  // Minimum 128 byte FIFO depth
 localparam  RFD     = nextPow2(MINFD)>>2;   // FIFO depth next power of 2 (and divide by 4)
 
-// FF_FULL_THRESHOLD is the number of words in the FIFO before we set the
-// almost FULL flag. In other words. We pause reading data from memory if
-// the FIFO reaches this level. If we are overrunning the FIFO, this
-// number needs to be reduced.
-localparam  FF_FULL_THRESHOLD = RFD - 16;
+localparam  FIFO_MARGIN     = 5;            // Cushion between FIFO depth and our perceived depth
+localparam  FIFO_THRESHOLD  = RFD - FIFO_MARGIN;
 
 //Bit descriptions for TX descriptor
 localparam  BIT_LEN_H   = 31,   // Upper bit of length field
@@ -114,6 +113,7 @@ localparam  TX_IDLE     =   0,  // Waiting for data to transmit
 
 wire            pre_av_read;    // pre-registered avalon read signal
 wire    [31:0]  pre_av_address; // pre_registered avalon address
+wire            valid_tx_read;  // Avalon bus acknowledged read
 
 reg     [5:0]   state;          // State machine bits
 wire    [15:0]  bd_len;         // Frame length from descriptor
@@ -129,6 +129,8 @@ reg     [1:0]   last_valid_cnt; // Number of valid bytes in last data word
 reg     [13:0]  tg_cnt;         // target count (number of words to read from memory)
 reg     [13:0]  rd_cnt;         // read count (number of words read from memory)
 reg     [13:0]  wr_cnt;         // write count (number of words written to FIFO)
+reg     [13:0]  rd_pending;     // Number of reads pending (used to gate reads for FIFO protection)
+reg             pipe_hold;      // Hold the pipeline until some of the reads have come back
 wire    [15:0]  next_tg_cnt;    // intentionally 2 bits larger
 wire    [13:0]  next_rd_cnt;    // next value of rd_cnt
 wire    [13:0]  next_wr_cnt;    // next value of wr_cnt
@@ -147,8 +149,8 @@ wire            stat_error;     // Status indicates error
 
 
 wire            dff_clear;      // Data FIFO clear
-wire    [clogb2(RFD-1):0]   dff_wrused;
-wire            dff_almost_full;// Data FIFO almost full
+wire    [clogb2(RFD-1)-1:0] dff_wrused; // Amount of space used in data FIFO
+reg     [clogb2(RFD-1):0]   dff_used_la;// Future value of dff_wrused when all reads are finished
 wire            dff_full;       // Data FIFO full
 wire            dff_write;      // Data FIFO write
 wire    [35:0]  dff_din;        // Data FIFO data input
@@ -159,6 +161,7 @@ wire    [35:0]  dff_dout;       // Data FIFO data output
 
 reg     [2:0]   tx_state;       // Transmit state machine bits
 reg             tx_stat_valid_r;// Registered tx_stat_valid
+wire            tx_start;       // Start signal to transmit state machine
 wire            last_byte;      // Indicates last valid byte of current data word
 wire    [7:0]   tx_ff_data [0:3];// Transmit bytes from data FIFO
 wire    [1:0]   byte_cnt;       // Indicates how many bytes are valid from data FIFO
@@ -166,7 +169,7 @@ reg     [1:0]   byte_index;     // Indexes tx_ff_data for byte transmission
 
 //Avalon bus
 assign  pre_av_address  = {ptr[31:2],2'b00};
-assign  pre_av_read     = state[ST_DMA1 ] & ~dff_almost_full;
+assign  pre_av_read     = state[ST_DMA1 ] & ~pipe_hold;
 assign  valid_tx_rd     = pre_av_read & ~av_waitrequest;
 
 //Descriptor bus
@@ -239,6 +242,8 @@ assign  valid_cnt   = first_write ? first_valid_cnt:
 always @(posedge clk) begin
                                             valid_rdata <= av_readdatavalid;
                                             rdata       <= av_readdata;
+                                            rd_pending  <= rd_cnt - wr_cnt;         // 1 clock lag
+                                            dff_used_la <= dff_wrused + rd_pending; // 1 clock lag
         if(valid_rdata)                     wr_cnt      <= next_wr_cnt;
     //This really is a parallel case 
     case(1'b1) // synopsys parallel_case 
@@ -248,6 +253,7 @@ always @(posedge clk) begin
                                             wr_cnt      <= 14'd0;               //clear write count
                                             TxB_IRQ     <= 1'b0;                //clear irq
                                             TxE_IRQ     <= 1'b0;                //clear error irq
+                                            pipe_hold   <= 1'b0;                //clear pipe hold flag
             if(~TxEn)                       bd_index    <= 7'd0;                //clear the BD indexer
         end //state[ST_IDLE ]
 
@@ -261,6 +267,7 @@ always @(posedge clk) begin
         state[ST_DMA1 ]: begin
                                             first_valid_cnt <= (3'd3 - {1'b0,ptr[1:0]});
                                             last_valid_cnt  <= (desc_len[2:0] + {1'b0,ptr[1:0]}) - 3'd1;
+                                            pipe_hold       <= dff_used_la > FIFO_THRESHOLD;  // 1 clock lag
             if(valid_tx_rd) begin 
                                             ptr[31:2]   <= ptr[31:2] + 30'd1;   //increment read address
                                             last_read_r <= last_read;           //set last read flag
@@ -289,7 +296,6 @@ assign  dff_din[35]     = first_write;
 assign  dff_din[34]     = last_write;
 assign  dff_din[33:32]  = valid_cnt;
 assign  dff_din[31:0]   = first_write? (rdata >> {ptr[1:0],3'd0}): rdata;
-assign  dff_almost_full = dff_wrused >= FF_FULL_THRESHOLD;
 
 //We'll read from the FIFO everytime there is a word ready or if something
 //happened to put us into the WAIT state. We do this to flush the FIFO so
@@ -335,7 +341,7 @@ eth_dc_reg stat_ack_dc_reg(
 //words in the FIFO or when the DMA transfer
 //has finished.
 eth_dc_reg tx_start_dc_reg(
-	.d      ((dff_wrused >= 8)/*dff_almost_full*/ | state[ST_DMA2]   ),
+	.d      ((dff_wrused >= 8) | state[ST_DMA2]   ),
 	.inclk  (clk            ),
 	.outclk (txclk          ),
 	.reset  (reset          ),
