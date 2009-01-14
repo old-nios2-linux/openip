@@ -23,6 +23,11 @@
 //      08/12/08 - Added logic to prevent FIFO overflows when 
 //                 Avalon BUS has large latency.
 //
+//      12/02/08 - Modified condition for passing start flag to
+//                 transmit state machine. This resolves an issue
+//                 with memory interfaces with very long read
+//                 latencies when transmitting short packets.
+//
 module eth_avalon_txdma    #(parameter FIFO_DEPTH=128) (
     //Commaon signals
     input               clk,                // System clock
@@ -113,7 +118,7 @@ localparam  TX_IDLE     =   0,  // Waiting for data to transmit
 
 wire            pre_av_read;    // pre-registered avalon read signal
 wire    [31:0]  pre_av_address; // pre_registered avalon address
-wire            valid_tx_read;  // Avalon bus acknowledged read
+wire            valid_tx_rd;    // Avalon bus acknowledged read
 
 reg     [5:0]   state;          // State machine bits
 wire    [15:0]  bd_len;         // Frame length from descriptor
@@ -341,7 +346,7 @@ eth_dc_reg stat_ack_dc_reg(
 //words in the FIFO or when the DMA transfer
 //has finished.
 eth_dc_reg tx_start_dc_reg(
-	.d      ((dff_wrused >= 8) | state[ST_DMA2]   ),
+	.d      ((dff_wrused >= 8) | (state[ST_DMA2] & ~first_write) ),
 	.inclk  (clk            ),
 	.outclk (txclk          ),
 	.reset  (reset          ),

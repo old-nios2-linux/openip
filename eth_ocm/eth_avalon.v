@@ -13,6 +13,11 @@
 ////  file.                                                       ////
 ////                                                              ////
 //////////////////////////////////////////////////////////////////////
+//    History:
+//      12/01/08 - Added proper support for aborted RX packets.
+//                 This addresses an issue with the MAC not aborting
+//                 promiscuous packets in non-promiscuous mode.
+//
 
 `include "eth_defines.v"
 `include "timescale.v"
@@ -292,6 +297,7 @@ eth_avalon_rxdma    #(.FIFO_DEPTH(RX_FIFO_DEPTH)    )   eth_rxdma_inst(
     .rx_err             (RxStatus_r         ),  // error bits
     .rx_sop             (RxStartFrm         ),  // start of data packet
     .rx_eop             (RxEndFrm | RxAbort ),  // end of data packet
+    .rx_abort           (RxAbort            ),  // abort packet
 
     //Interrupt outputs
     .RxB_IRQ            (RxB_IRQ            ),  // Receive success IRQ
