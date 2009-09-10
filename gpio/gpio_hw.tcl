@@ -36,7 +36,7 @@ set_module_property EDITABLE false
 # +-----------------------------------
 # | files
 # | 
-add_file gpio.v {SYNTHESIS SIMULATION}
+add_file hdl/gpio.v {SYNTHESIS SIMULATION}
 # | 
 # +-----------------------------------
 
